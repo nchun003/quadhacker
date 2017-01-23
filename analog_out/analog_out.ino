@@ -12,14 +12,19 @@ const uint8_t ch4_min = 0, ch4_max = 134;
 // T, A, E, R, ch5, ch6
 const uint8_t channelmap[] = {3, 1, 0, 2, 4, 5};
 
-// PLACEHOLDER - may change with battery voltage
-const float vscale = (5.0f / 2.95f);
+float vscale = 1.0f;
 
 void setup() {
   pinMode(CS_PIN, OUTPUT);
   SPI.begin();
   Serial.begin(115200);
   Serial.println("Start logging values");
+  
+  // calibrate ADCs
+  // A4 is connected to transmitter reference
+  // A5 is connected to 5V reference
+  delay(1000);
+  vscale = ((float)analogRead(A5) / (float)analogRead(A4));
 }
 
 void loop() {
