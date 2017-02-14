@@ -72,6 +72,7 @@ unsigned long time_capture_lost = 0;
 uint8_t flag_capture_lost = 0;
 unsigned long capture_timeout = 1000; // wait 1000 milliseconds to resume manual on capture loss
 
+
 // input filtering
 uint8_t enable_filtering = 0;
 uint8_t flag_data_received = 0;
@@ -79,6 +80,33 @@ const uint8_t data_filter_max = 4;
 float data_filter[4][data_filter_max] = { 0.0f };
 uint8_t data_filter_index = 0;
 uint8_t data_filter_size = 0;
+
+void filter_data(float *pos_x, float *pos_y, float *heading, float *altitude) {
+
+  // store raw inputs
+  uint8_t j = data_filter_index;
+  data_filter[0][j] = *pos_x;
+  data_filter[1][j] = *pos_y;
+  data_filter[2][j] = *heading;
+  data_filter[3][j] = *altitude;
+
+  if(data_filter_size < 10) data_filter_size++;
+  data_filter_index = (data_filter_index + 1) % data_filter_max;
+
+  // compute average of stored inputs
+  *pos_x = *pos_y = *heading = *altitude = 0.0f;
+  for(uint8_t i = 0; i < data_filter_size; i++) {
+    *pos_x += data_filter[0][i];
+    *pos_y += data_filter[1][i];
+    *heading += data_filter[2][i];
+    *altitude += data_filter[3][i];
+  }
+
+  *pos_x /= data_filter_size;
+  *pos_y /= data_filter_size;
+  *heading /= data_filter_size;
+  *altitude /= data_filter_size;
+}
 
 
 void setup() {
@@ -159,20 +187,20 @@ void loop() {
         break;
       case DATA_POS_X:
         digitalWrite(LED_MODE, HIGH);
-        pos_x_pre = Serial.parseFloat();
+        pos_x = Serial.parseFloat();
         digitalWrite(LED_MODE, LOW);
         next_data = DATA_POS_Y;
         break;
       case DATA_POS_Y:
-        pos_y_pre = Serial.parseFloat();
+        pos_y = Serial.parseFloat();
         next_data = DATA_HDG;
         break;
       case DATA_HDG:
-        heading_pre = Serial.parseFloat();
+        heading = Serial.parseFloat();
         next_data = DATA_ALT;
         break;
       case DATA_ALT:
-        altitude_pre = Serial.parseFloat();
+        altitude = Serial.parseFloat();
         flag_data_received = 1;
         next_data = DATA_END;
         break;
@@ -191,36 +219,8 @@ void loop() {
 
   // input filtering
   if(enable_filtering && flag_data_received) {
-    // store raw inputs
-    uint8_t j = data_filter_index;
-    data_filter[0][j] = pos_x_pre;
-    data_filter[1][j] = pos_y_pre;
-    data_filter[2][j] = heading_pre;
-    data_filter[3][j] = altitude_pre;
-
-    if(data_filter_size < 10) data_filter_size++;
-    data_filter_index = (data_filter_index + 1) % data_filter_max;
-
-    // compute average of stored inputs
-    pos_x = pos_y = heading = altitude = 0.0f;
-    for(uint8_t i = 0; i < data_filter_size; i++) {
-      pos_x += data_filter[0][i];
-      pos_y += data_filter[1][i];
-      heading += data_filter[2][i];
-      altitude += data_filter[3][i];
-    }
-
-    pos_x /= data_filter_size;
-    pos_y /= data_filter_size;
-    heading /= data_filter_size;
-    altitude /= data_filter_size;
-    
+    filter_data(&pos_x, &pos_y, &heading, &altitude);
     flag_data_received = 0;
-  } else if(!enable_filtering) {
-    pos_x = pos_x_pre;
-    pos_y = pos_y_pre;
-    heading = heading_pre;
-    altitude = altitude_pre;
   }
 
   // TODO: more complex mode change logic
