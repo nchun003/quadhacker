@@ -22,7 +22,7 @@ const uint8_t channelmap[] = {3, 1, 0, 2, 4, 5};
 const uint8_t PID_MAX = 70;
 
 // PID tuning values
-double ch1_kp = 0.05, ch1_ki = 0.01, ch1_kd = 0.1;
+double ch1_kp = 1, ch1_ki = 0.1, ch1_kd = 0.5;
 double ch2_kp = 0.8, ch2_ki = 0.4, ch2_kd = 0.3;
 double ch3_kp = 1, ch3_ki = 0.5, ch3_kd = 0.2;
 double ch4_kp = 2, ch4_ki = 0, ch4_kd = 0;
@@ -270,7 +270,7 @@ void loop() {
       flag_mode_change = 0;
     }
 
-    uint8_t target_altitude = 60;
+    float target_altitude = 60;
 
     // pid sensor inputs
     if(!flag_capture_lost) {
@@ -283,7 +283,7 @@ void loop() {
     }
 
     // pid setpoints (targets)
-    ch1_setpoint = target_altitude;
+    ch1_setpoint = 0;
     ch2_setpoint = 0;
     ch3_setpoint = 0;
     ch4_setpoint = 0;
@@ -309,17 +309,17 @@ void loop() {
       uint8_t val = 255 - (uint8_t)(control_inputs[i] * vscale);
       digitalPotWrite(channelmap[i], val);
     }*/
-    digitalPotWrite(channelmap[0], 255 - (uint8_t)(inputs[0] * vscale));
-    digitalPotWrite(channelmap[1], 255 - (uint8_t)(control_inputs[1] * vscale));
-    digitalPotWrite(channelmap[2], 255 - (uint8_t)(control_inputs[2] * vscale));
+    digitalPotWrite(channelmap[0], 255 - (uint8_t)(control_inputs[0] * vscale));
+    digitalPotWrite(channelmap[1], 255 - (uint8_t)(inputs[1] * vscale));
+    digitalPotWrite(channelmap[2], 255 - (uint8_t)(inputs[2] * vscale));
     digitalPotWrite(channelmap[3], 255 - (uint8_t)(inputs[3] * vscale));
 
     // serial debug
   
-    //Serial.print("ALT: ");
-    //Serial.println(altitude - target_altitude);
-    //Serial.print("CH1: ");
-    //Serial.println(ch1_output);
+    Serial.print("ALT: ");
+    Serial.println(altitude - target_altitude);
+    Serial.print("CH1: ");
+    Serial.println(ch1_output);
 
     if(flag_capture_lost)
       digitalWrite(LED_MODE, (millis() / 100 % 2) ? HIGH : LOW);
