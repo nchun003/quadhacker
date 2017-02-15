@@ -40,8 +40,7 @@ PID ch3_pid(&ch3_input, &ch3_output, &ch3_setpoint, ch3_kp, ch3_ki, ch3_kd, DIRE
 PID ch4_pid(&ch4_input, &ch4_output, &ch4_setpoint, ch4_kp, ch4_ki, ch4_kd, REVERSE);
 
 // types of data being sent
-const int DATA_START_VAL = 7777;
-const int DATA_END_VAL = 9999;
+// data format is <S-M--.--X--.--Y--.--H--.--A--CE>
 enum DATA_TYPES {DATA_START, DATA_MODE, DATA_POS_X, DATA_POS_Y, DATA_HDG, DATA_ALT, DATA_END};
 
 // state which denotes which information is next
@@ -71,6 +70,15 @@ uint8_t calibration_stage = 0;
 unsigned long time_capture_lost = 0;
 uint8_t flag_capture_lost = 0;
 unsigned long capture_timeout = 1000; // wait 1000 milliseconds to resume manual on capture loss
+
+
+// writes values to AD5206 RDAC
+void digitalPotWrite(int address, int value) {
+  digitalWrite(CS_PIN, LOW);
+  SPI.transfer(address);
+  SPI.transfer(value);
+  digitalWrite(CS_PIN, HIGH);
+}
 
 
 // input filtering
@@ -108,18 +116,90 @@ void filter_data(float *pos_x, float *pos_y, float *heading, float *altitude) {
   *altitude /= data_filter_size;
 }
 
-uint8_t data_buffer[17];
-uint8_t data_buffer_pos = 0;
+
+char data_buffer[64];
+uint8_t data_buffer_index = 0;
 uint8_t data_buffer_ready = 0;
+
 void read_data() {
-  if(Serial.available() > 0) {
-    
+  // leave if buffer is already populated and waiting to be parsed
+  if(data_buffer_ready) return;
+  
+  // keep reading while data is being received
+  while(Serial.available() > 0) {
+    char in_char = Serial.read();
+
+    if(data_buffer_index != 0 || (data_buffer_index == 0 && in_char == 'S')) {
+      data_buffer[data_buffer_index] = in_char;
+      data_buffer_index++;
+    }
+
+    if(in_char == 'E') {
+      data_buffer_ready = 1;
+      break;
+    }
   }
 }
 
+// parsing message errors
+enum PARSE_ERRORS { 
+  PARSE_ERROR_BAD_START,
+  PARSE_ERROR_EMPTY_FIELD,
+  PARSE_ERROR_UNEXPECTED_CHAR
+};
 
-void parse_data() {
-  
+void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *heading, float *altitude) {
+  // leave if buffer not ready
+  if(!data_buffer_ready) return;
+
+  String to_parse = "";
+  unsigned int i = 0;
+  uint8_t parse_error = 0;
+  unsigned int checksum;
+  while(i < data_buffer_index && !parse_error) {
+    switch(data_buffer[i]) {
+      case 'S':
+        if(i != 0) parse_error = PARSE_ERROR_BAD_START;
+        break;
+      case 'M':
+        if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
+        *mode_requested =to_parse.toInt();
+        break;
+      case 'X':
+        if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
+        *pos_x = to_parse.toFloat();
+        to_parse = "";
+        break;
+      case 'Y':
+        if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
+        *pos_y = to_parse.toFloat();
+        to_parse = "";
+        break;
+      case 'H':
+        if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
+        *heading = to_parse.toFloat();
+        to_parse = "";
+        break;
+      case 'A':
+        if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
+        *altitude = to_parse.toFloat();
+        to_parse = "";
+        break;
+      case 'C':
+        if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
+        checksum = to_parse.toInt();
+        break;
+      default:
+        if((data_buffer[i] < 0 || data_buffer[i] > '9') && data_buffer[i] != '.') parse_error = PARSE_ERROR_UNEXPECTED_CHAR;
+        else to_parse += data_buffer[i];
+        break;
+    }
+
+    i++;
+  }
+
+  data_buffer_ready = 0;
+  data_buffer_index = 0;
 }
 
 
@@ -168,68 +248,23 @@ void loop() {
   vscale = ((float)analogRead(A5) / (float)analogRead(A4));
 
   // receive instructions
-  if(Serial.available() > 0) {
-    //Serial.println(data);
-    int data;
-    switch(next_data) {
-      case DATA_START:
-        data = (int)Serial.parseInt();
-        if(data != DATA_START_VAL) break;
-        next_data = DATA_MODE;
-        break;
-      case DATA_MODE:
-        // mode changes are request-based
-        data = (int)Serial.parseInt();
-        if(data != mode) {
-          if(mode == MODE_CAPTURE) {
-            if(time_capture_lost == 0) {
-              time_capture_lost = millis();
-            } else if(millis() - time_capture_lost >= capture_timeout) {
-              flag_mode_change = 1;
-              mode_requested = data;
-              time_capture_lost = 0;
-            }
-          } else {
-            flag_mode_change = 1;
-            mode_requested = data;
-          }
-        } else {
-          time_capture_lost = 0;
-        }
-        flag_capture_lost = !(time_capture_lost == 0);
-        next_data = DATA_POS_X;
-        break;
-      case DATA_POS_X:
-        digitalWrite(LED_MODE, HIGH);
-        pos_x = Serial.parseFloat();
-        digitalWrite(LED_MODE, LOW);
-        next_data = DATA_POS_Y;
-        break;
-      case DATA_POS_Y:
-        pos_y = Serial.parseFloat();
-        next_data = DATA_HDG;
-        break;
-      case DATA_HDG:
-        heading = Serial.parseFloat();
-        next_data = DATA_ALT;
-        break;
-      case DATA_ALT:
-        altitude = Serial.parseFloat();
-        flag_data_received = 1;
-        next_data = DATA_END;
-        break;
-      case DATA_END:
-        data = (int)Serial.parseInt();
-        if(data != DATA_END_VAL) break;
-        next_data = DATA_START;
-        break;
-      default:
-        data = (int)Serial.parseInt();
-        Serial.print("JUNK VALUES >> ");
-        Serial.println(data);
-        break;
-    }
-  }
+  read_data();
+  parse_data(&mode_requested, &pos_x, &pos_y, &heading, &altitude);
+
+  Serial.println(pos_x);
+
+  // mode change logic
+  if(mode_requested != mode) {
+    if(mode == MODE_CAPTURE) {
+      if(time_capture_lost == 0) {
+        time_capture_lost = millis();
+      } else if(millis() - time_capture_lost >= capture_timeout) {
+        flag_mode_change = 1;
+        time_capture_lost = 0;
+      }
+    } else flag_mode_change = 1;
+  } else time_capture_lost = 0;
+  flag_capture_lost = !(time_capture_lost == 0);
 
   // input filtering
   if(enable_filtering && flag_data_received) {
@@ -329,23 +364,16 @@ void loop() {
     digitalPotWrite(channelmap[3], 255 - (uint8_t)(inputs[3] * vscale));
 
     // serial debug
-  
+  /*
     Serial.print("ALT: ");
     Serial.println(altitude - target_altitude);
     Serial.print("CH1: ");
     Serial.println(ch1_output);
-
+*/
     if(flag_capture_lost)
       digitalWrite(LED_MODE, (millis() / 100 % 2) ? HIGH : LOW);
     else
       digitalWrite(LED_MODE, HIGH);
   }
-}
-
-void digitalPotWrite(int address, int value) {
-  digitalWrite(CS_PIN, LOW);
-  SPI.transfer(address);
-  SPI.transfer(value);
-  digitalWrite(CS_PIN, HIGH);
 }
 
