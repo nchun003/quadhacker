@@ -145,7 +145,8 @@ void read_data() {
 enum PARSE_ERRORS { 
   PARSE_ERROR_BAD_START,
   PARSE_ERROR_EMPTY_FIELD,
-  PARSE_ERROR_UNEXPECTED_CHAR
+  PARSE_ERROR_UNEXPECTED_CHAR,
+  PARSE_ERROR_INVALID_CHECKSUM
 };
 
 void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *heading, float *altitude) {
@@ -155,7 +156,7 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
   String to_parse = "";
   unsigned int i = 0;
   uint8_t parse_error = 0;
-  unsigned int checksum;
+  unsigned int checksum_received, checksum_calculated;
   while(i < data_buffer_index && !parse_error) {
     switch(data_buffer[i]) {
       case 'S':
@@ -187,10 +188,12 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
         break;
       case 'C':
         if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
-        checksum = to_parse.toInt();
+        checksum_received = to_parse.toInt();
+        break;
+      case 'E':
         break;
       default:
-        if((data_buffer[i] < 0 || data_buffer[i] > '9') && data_buffer[i] != '.') parse_error = PARSE_ERROR_UNEXPECTED_CHAR;
+        if((data_buffer[i] < '0' || data_buffer[i] > '9') && data_buffer[i] != '.' && data_buffer[i] != '-') { Serial.println(data_buffer[i]); parse_error = PARSE_ERROR_UNEXPECTED_CHAR; }
         else to_parse += data_buffer[i];
         break;
     }
@@ -198,6 +201,40 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
     i++;
   }
 
+  // checksum comparison
+  for(unsigned int i = 0; i < data_buffer_index; i++) {
+      checksum_calculated += data_buffer[i];
+      if(data_buffer[i] == 'A') break;
+  }
+  checksum_calculated %= 256;
+  if(checksum_calculated != checksum_received)
+    parse_error = PARSE_ERROR_INVALID_CHECKSUM;
+
+  // error reporting
+  if(parse_error != 0) {
+    switch(parse_error) {
+      case PARSE_ERROR_BAD_START:
+        Serial.println("PARSE ERROR: Bad start");
+        break;
+      case PARSE_ERROR_EMPTY_FIELD:
+        Serial.println("PARSE ERROR: Missing data");
+        break;
+      case PARSE_ERROR_UNEXPECTED_CHAR:
+        Serial.println("PARSE ERROR: Unexpected char");
+        break;
+      case PARSE_ERROR_INVALID_CHECKSUM:
+        Serial.print("PARSE ERROR: Invalid checksum, got: ");
+        Serial.print(checksum_received);
+        Serial.print(", expected: ");
+        Serial.println(checksum_calculated);
+        break;
+      default:
+        Serial.println("PARSE ERROR: UNKNOWN");
+        break;
+    }
+  }
+
+  // reset buffer
   data_buffer_ready = 0;
   data_buffer_index = 0;
 }
