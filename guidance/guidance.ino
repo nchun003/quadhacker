@@ -1,5 +1,6 @@
 #include <SPI.h>
 #include "PID_v1.h"
+#include "Radio.h"
 
 #define CS_PIN 10
 #define LED_MODE 12
@@ -8,6 +9,8 @@
 #define PIN_CH2 A1
 #define PIN_CH3 A2
 #define PIN_CH4 A3
+
+Radio radio(0,0,0,0,0);
 
 // channel minmax values
 const uint8_t ch1_min = 0, ch1_max = 150;
@@ -126,8 +129,9 @@ void read_data() {
   if(data_buffer_ready) return;
   
   // keep reading while data is being received
-  while(Serial.available() > 0) {
-    char in_char = Serial.read();
+  while(radio.available() > 0) {
+
+    char in_char = radio.read();
 
     if(data_buffer_index != 0 || (data_buffer_index == 0 && in_char == 'S')) {
       data_buffer[data_buffer_index] = in_char;
@@ -413,4 +417,3 @@ void loop() {
       digitalWrite(LED_MODE, HIGH);
   }
 }
-
