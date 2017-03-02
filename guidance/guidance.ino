@@ -129,8 +129,8 @@ void read_data() {
   if(data_buffer_ready) return;
   
   // keep reading while data is being received
-  while(radio.available() > 0) {
-
+  while(radio.available() > 0 || data_buffer[30] == 0) {
+    
     char in_char = radio.read();
 
     if(data_buffer_index != 0 || (data_buffer_index == 0 && in_char == 'S')) {
