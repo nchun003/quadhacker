@@ -8,7 +8,7 @@ CC1101 cc1101;
 //#define LEDOUTPUT 7
 #define LEDOUTPUT 13
 
-
+//D13, 10-12, 2
 // counter to get increment in each loop
 byte counter;
 byte b;
@@ -22,10 +22,11 @@ void blinker(){
   delay(100);
 }
 
+void setLED(int a) { digitalWrite(LEDOUTPUT, a ? 0 : 1); }
 
 void setup()
 {
-  Serial.begin(38400);
+  Serial.begin(115200);
   Serial.println("start");
   
   // setup the blinker output
@@ -35,28 +36,28 @@ void setup()
   // blink once to signal the setup
   blinker();
   
-  // reset the counter
-//  counter=0;
-//  Serial.println("initializing...");
-//  // initialize the RF Chip
-//  cc1101.init();
-//  
-//  //cc1101.setSyncWord(&syncWord, false);
-//  cc1101.setSyncWord(syncWord, false);
-//  cc1101.setCarrierFreq(CFREQ_915);
-//  cc1101.disableAddressCheck();
-//  //cc1101.setTxPowerAmp(PA_LowPower);
-//  
-//  delay(1000);
-//  
-//  Serial.print("CC1101_PARTNUM "); //cc1101=0
-//  Serial.println(cc1101.readReg(CC1101_PARTNUM, CC1101_STATUS_REGISTER));
-//  Serial.print("CC1101_VERSION "); //cc1101=4
-//  Serial.println(cc1101.readReg(CC1101_VERSION, CC1101_STATUS_REGISTER));
-//  Serial.print("CC1101_MARCSTATE ");
-//  Serial.println(cc1101.readReg(CC1101_MARCSTATE, CC1101_STATUS_REGISTER) & 0x1f);
-//  
-//  Serial.println("device initialized");
+//   reset the counter
+  counter=0;
+  Serial.println("initializing...");
+  // initialize the RF Chip
+  cc1101.init();
+  Serial.println("initialized");
+  //cc1101.setSyncWord(&syncWord, false);
+  cc1101.setSyncWord(syncWord, false);
+  cc1101.setCarrierFreq(CFREQ_433);
+  cc1101.disableAddressCheck();
+  //cc1101.setTxPowerAmp(PA_LowPower);
+  
+  delay(1000);
+  
+  Serial.print("CC1101_PARTNUM "); //cc1101=0
+  Serial.println(cc1101.readReg(CC1101_PARTNUM, CC1101_STATUS_REGISTER));
+  Serial.print("CC1101_VERSION "); //cc1101=4
+  Serial.println(cc1101.readReg(CC1101_VERSION, CC1101_STATUS_REGISTER));
+  Serial.print("CC1101_MARCSTATE ");
+  Serial.println(cc1101.readReg(CC1101_MARCSTATE, CC1101_STATUS_REGISTER) & 0x1f);
+  
+  Serial.println("device initialized");
 }
 
 
@@ -69,60 +70,45 @@ uint8_t data_buffer_ready = 0;
 void read_data() {
   int incomingByte = 0;
   if(data_buffer_ready) return;
-  while(Serial.available() == 0){
-    Serial.println("waiting");
-  }
   while(Serial.available() > 0){
     incomingByte = Serial.read();
-    Serial.println(incomingByte, DEC);
-//    Serial.println(data_buffer_index);
-    // Serial read data from pi 
-    if(data_buffer_index != 0 || (data_buffer_index == 0 && incomingByte == 'S')) {
+    // Serial.println(incomingByte, DEC);
+    // Serial read data from pi
+    if(incomingByte == 'S') {
+      data_buffer[0] = 'S';
+      data_buffer_index = 1;
+    } else {
       data_buffer[data_buffer_index] = incomingByte;
-      //going to send 1 byte at a time
-      char_data_buff = incomingByte;
-//      send_data();
       data_buffer_index++;
     }
+    
     if(incomingByte == 'E') {
       data_buffer_ready = 1;
       break;
     }
   }
-  Serial.println(data_buffer);  
-//    send_data();
 }
  
 void send_data() {
-  CCPACKET data;
-  data.length=10;
-//  data.length = 64;
-  byte blinkCount=counter++;
-  for(int i = 0; i<64; ++i){
-    data.data[i] = data_buffer[i];
-  }
-  Serial.print(data.data[0]);
-//  data.data[0] = data_buffer[0];  
-//  data.data[1] = data_buffer[1];
-//  data.data[2] = data_buffer[2];
-//    data.data[0] = char_data_buff;
-//  data.data[0]=5;
-//  data.data[1]=blinkCount;data.data[2]=0;
-//  data.data[3]=1;data.data[4]=0;
-//  data.data = byte(data_buffer);
-  //cc1101.flushTxFifo ();
-  Serial.print("CC1101_MARCSTATE ");
-//  Serial.println(data.data[30]);
-  Serial.println(cc1101.readReg(CC1101_MARCSTATE, CC1101_STATUS_REGISTER) & 0x1f);
-  if(cc1101.sendData(data)){
-    Serial.print(blinkCount,HEX);
-    Serial.println(" sent ok :)");
-//    blinker();
-  }else{
-    Serial.println("sent failed :(");
-//    blinker();
-//    blinker();
-  }
+ if(data_buffer_ready){
+    CCPACKET data;
+    data.length=data_buffer_index;
+
+    setLED(1);
+  
+    for(int i = 0; i<data_buffer_index; ++i){
+      data.data[i] = data_buffer[i];
+    }
+    if(cc1101.sendData(data)){
+      //Serial.println("sent ok :)");
+    }else{
+      //Serial.println("sent failed :(");
+    }
+
+    setLED(0);
+    data_buffer_ready = 0;
+    data_buffer_index = 0;
+ }
 }
 
 void ReadLQI()
@@ -161,5 +147,5 @@ void loop()
 {
   read_data();
   send_data();
-  delay(10);
+  delayMicroseconds(100);
 }
