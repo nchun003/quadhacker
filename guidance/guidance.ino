@@ -1,16 +1,17 @@
-#include <SPI.h>
 #include "PID_v1.h"
 #include "Radio.h"
 
-#define CS_PIN 10
-#define LED_MODE 12
+#define CS_PIN 9
+#define LED_MODE 8
 
 #define PIN_CH1 A0
 #define PIN_CH2 A1
 #define PIN_CH3 A2
 #define PIN_CH4 A3
 
-Radio radio(0,0,0,0,0);
+//Radio radio(0,0,0,0,0);
+Radio radio; 
+SPI spi;
 
 // channel minmax values
 const uint8_t ch1_min = 0, ch1_max = 150;
@@ -42,8 +43,11 @@ PID ch2_pid(&ch2_input, &ch2_output, &ch2_setpoint, ch2_kp, ch2_ki, ch2_kd, REVE
 PID ch3_pid(&ch3_input, &ch3_output, &ch3_setpoint, ch3_kp, ch3_ki, ch3_kd, DIRECT);
 PID ch4_pid(&ch4_input, &ch4_output, &ch4_setpoint, ch4_kp, ch4_ki, ch4_kd, REVERSE);
 
+
 // types of data being sent
 // data format is <S-M--.--X--.--Y--.--H--.--A--CE>
+// S1M12.12X13.13Y14.14H15.15A12CE
+//mode digit, fp, fp, heading, altitude, ... 
 enum DATA_TYPES {DATA_START, DATA_MODE, DATA_POS_X, DATA_POS_Y, DATA_HDG, DATA_ALT, DATA_END};
 
 // state which denotes which information is next
@@ -78,8 +82,8 @@ unsigned long capture_timeout = 1000; // wait 1000 milliseconds to resume manual
 // writes values to AD5206 RDAC
 void digitalPotWrite(int address, int value) {
   digitalWrite(CS_PIN, LOW);
-  SPI.transfer(address);
-  SPI.transfer(value);
+  spi.send(address);
+  spi.send(value);
   digitalWrite(CS_PIN, HIGH);
 }
 
@@ -120,7 +124,7 @@ void filter_data(float *pos_x, float *pos_y, float *heading, float *altitude) {
 }
 
 
-char data_buffer[64];
+char data_buffer[128];
 uint8_t data_buffer_index = 0;
 uint8_t data_buffer_ready = 0;
 
@@ -130,15 +134,19 @@ void read_data() {
   
   // keep reading while data is being received
   while(radio.available() > 0) {
-
     char in_char = radio.read();
-
-    if(data_buffer_index != 0 || (data_buffer_index == 0 && in_char == 'S')) {
+    //Serial.print(in_char);
+    
+    if(in_char == 'S') { // restart buffer
+      data_buffer[0] = 'S';
+      data_buffer_index = 1;
+    } else { // write normally
       data_buffer[data_buffer_index] = in_char;
       data_buffer_index++;
     }
 
     if(in_char == 'E') {
+      //Serial.print("\n");
       data_buffer_ready = 1;
       break;
     }
@@ -159,9 +167,10 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
 
   String to_parse = "";
   unsigned int i = 0;
-  uint8_t parse_error = 0;
+  int8_t parse_error = -1;
+  uint8_t do_checksum = 0;
   unsigned int checksum_received, checksum_calculated;
-  while(i < data_buffer_index && !parse_error) {
+  while(i < data_buffer_index && parse_error == -1) {
     switch(data_buffer[i]) {
       case 'S':
         if(i != 0) parse_error = PARSE_ERROR_BAD_START;
@@ -206,16 +215,20 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
   }
 
   // checksum comparison
-  for(unsigned int i = 0; i < data_buffer_index; i++) {
-      checksum_calculated += data_buffer[i];
-      if(data_buffer[i] == 'A') break;
+  if(do_checksum && parse_error == -1) { // only check if no other errors
+    for(unsigned int i = 0; i < data_buffer_index; i++) {
+        Serial.print(data_buffer[i]);
+        checksum_calculated += data_buffer[i];
+        if(data_buffer[i] == 'A') break;
+    }
+    Serial.print("\n");
+    checksum_calculated %= 256;
+    if(checksum_calculated != checksum_received)
+      parse_error = PARSE_ERROR_INVALID_CHECKSUM;
   }
-  checksum_calculated %= 256;
-  if(checksum_calculated != checksum_received)
-    parse_error = PARSE_ERROR_INVALID_CHECKSUM;
 
   // error reporting
-  if(parse_error != 0) {
+  if(parse_error != -1) {
     switch(parse_error) {
       case PARSE_ERROR_BAD_START:
         Serial.println("PARSE ERROR: Bad start");
@@ -244,16 +257,19 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
 }
 
 
-void setup() {
+void setup() { 
   // SPI for RDAC
   pinMode(CS_PIN, OUTPUT);
-  SPI.begin();
-
+  
+  spi.init();
+  
   // serial tether
   Serial.begin(115200);
 
   // mode indicator LED
   pinMode(LED_MODE, OUTPUT);
+
+//  radio.cc1101.init();
 
   // setup PID output limits
   ch1_pid.SetOutputLimits(-20, 20);
@@ -269,6 +285,10 @@ void setup() {
 
   // vscale placeholder
   vscale = 3/5;
+  
+
+  // initialize cc1101 radio
+  radio.init();
 
   // blink ready
   Serial.println("Guidance module ready");
@@ -279,6 +299,9 @@ void setup() {
 void loop() {
   uint8_t inputs[8];
   uint8_t control_inputs[8];
+
+  // update the radio buffers
+  radio.update();
 
   // input
   for(uint8_t i = 0; i < 8; i++) {
@@ -291,8 +314,10 @@ void loop() {
   // receive instructions
   read_data();
   parse_data(&mode_requested, &pos_x, &pos_y, &heading, &altitude);
+//  radio.ReadLQI();
+//  radio.ReadRSSI();
 
-  Serial.println(pos_x);
+  //Serial.println(pos_x);
 
   // mode change logic
   if(mode_requested != mode) {
@@ -397,7 +422,7 @@ void loop() {
     // write to RDAC
     for(uint8_t i = 0; i < 4; i++) {
       uint8_t val = 255 - (uint8_t)(control_inputs[i] * vscale);
-      digitalPotWrite(channelmap[i], val);
+      digitalPotWrite(channelmap[i], v al);
     }*/
     digitalPotWrite(channelmap[0], 255 - (uint8_t)(control_inputs[0] * vscale));
     digitalPotWrite(channelmap[1], 255 - (uint8_t)(inputs[1] * vscale));
@@ -417,3 +442,4 @@ void loop() {
       digitalWrite(LED_MODE, HIGH);
   }
 }
+
