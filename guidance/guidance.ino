@@ -2,7 +2,8 @@
 #include "Radio.h"
 
 #define CS_PIN 9
-#define LED_MODE 8
+#define LED_PIN 8
+#define SWITCH_PIN 4
 
 #define PIN_CH1 A0
 #define PIN_CH2 A1
@@ -27,8 +28,9 @@ const uint8_t PID_MAX = 70;
 
 // PID tuning values
 double ch1_kp = 1, ch1_ki = 0.1, ch1_kd = 0.5;
-double ch2_kp = 0.8, ch2_ki = 0.4, ch2_kd = 0.3;
-double ch3_kp = 1, ch3_ki = 0.5, ch3_kd = 0.2;
+double ch2_kp = 0.15, ch2_ki = 0.15, ch2_kd = 0.15;
+double ch3_kp = ch2_kp, ch3_ki = ch2_ki, ch3_kd = ch2_kd;
+//double ch3_kp = 0.4, ch3_ki = 0.5, ch3_kd = 0.2;
 double ch4_kp = 2, ch4_ki = 0, ch4_kd = 0;
 
 // PID variables
@@ -38,9 +40,9 @@ double ch3_setpoint, ch3_input, ch3_output;
 double ch4_setpoint, ch4_input, ch4_output;
 
 // PID objects
-PID ch1_pid(&ch1_input, &ch1_output, &ch1_setpoint, ch1_kp, ch1_ki, ch1_kd, REVERSE);
-PID ch2_pid(&ch2_input, &ch2_output, &ch2_setpoint, ch2_kp, ch2_ki, ch2_kd, REVERSE);
-PID ch3_pid(&ch3_input, &ch3_output, &ch3_setpoint, ch3_kp, ch3_ki, ch3_kd, DIRECT);
+PID ch1_pid(&ch1_input, &ch1_output, &ch1_setpoint, ch1_kp, ch1_ki, ch1_kd, DIRECT);
+PID ch2_pid(&ch2_input, &ch2_output, &ch2_setpoint, ch2_kp, ch2_ki, ch2_kd, DIRECT);
+PID ch3_pid(&ch3_input, &ch3_output, &ch3_setpoint, ch3_kp, ch3_ki, ch3_kd, REVERSE);
 PID ch4_pid(&ch4_input, &ch4_output, &ch4_setpoint, ch4_kp, ch4_ki, ch4_kd, REVERSE);
 
 
@@ -178,6 +180,7 @@ void parse_data(uint8_t *mode_requested, float *pos_x, float *pos_y, float *head
       case 'M':
         if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
         *mode_requested =to_parse.toInt();
+        to_parse = "";
         break;
       case 'X':
         if(to_parse.length() == 0) { parse_error = PARSE_ERROR_EMPTY_FIELD; break; }
@@ -267,7 +270,10 @@ void setup() {
   Serial.begin(115200);
 
   // mode indicator LED
-  pinMode(LED_MODE, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  // user switch
+  pinMode(SWITCH_PIN, INPUT);
 
 //  radio.cc1101.init();
 
@@ -278,10 +284,11 @@ void setup() {
   ch4_pid.SetOutputLimits(-PID_MAX, PID_MAX);
 
   // set PID sample time
-  ch1_pid.SetSampleTime(10);
-  ch2_pid.SetSampleTime(10);
-  ch3_pid.SetSampleTime(10);
-  ch4_pid.SetSampleTime(10);
+  int pid_sample_time = 25;
+  ch1_pid.SetSampleTime(pid_sample_time);
+  ch2_pid.SetSampleTime(pid_sample_time);
+  ch3_pid.SetSampleTime(pid_sample_time);
+  ch4_pid.SetSampleTime(pid_sample_time);
 
   // vscale placeholder
   vscale = 3/5;
@@ -292,7 +299,7 @@ void setup() {
 
   // blink ready
   Serial.println("Guidance module ready");
-  for(int i = 0; i < 6; i++) { digitalWrite(LED_MODE, (i % 2) ? HIGH : LOW); delay(150); }
+  for(int i = 0; i < 6; i++) { digitalWrite(LED_PIN, (i % 2) ? HIGH : LOW); delay(150); }
 }
 
 
@@ -367,7 +374,7 @@ void loop() {
       digitalPotWrite(channelmap[i], val);
     }
     
-    digitalWrite(LED_MODE, LOW);
+    digitalWrite(LED_PIN, LOW);
   } else if(mode == MODE_CAPTURE) {
     
     // capture mode - switch to PID control
@@ -414,6 +421,9 @@ void loop() {
     control_inputs[1] = (uint8_t)constrain(round(ch2_output + inputs[1]), 0, 255);
     control_inputs[2] = (uint8_t)constrain(round(ch3_output + inputs[2]), 0, 255);
     control_inputs[3] = (uint8_t)constrain(round(ch4_output + inputs[3]), 0, 255);
+    
+    Serial.println(ch2_input);
+    Serial.println(control_inputs[1]);
 
     // throttle cut override
     if(inputs[0] < 10) control_inputs[0] = inputs[0];
@@ -425,8 +435,8 @@ void loop() {
       digitalPotWrite(channelmap[i], v al);
     }*/
     digitalPotWrite(channelmap[0], 255 - (uint8_t)(control_inputs[0] * vscale));
-    digitalPotWrite(channelmap[1], 255 - (uint8_t)(inputs[1] * vscale));
-    digitalPotWrite(channelmap[2], 255 - (uint8_t)(inputs[2] * vscale));
+    digitalPotWrite(channelmap[1], 255 - (uint8_t)(control_inputs[1] * vscale));
+    digitalPotWrite(channelmap[2], 255 - (uint8_t)(control_inputs[2] * vscale));
     digitalPotWrite(channelmap[3], 255 - (uint8_t)(inputs[3] * vscale));
 
     // serial debug
@@ -437,9 +447,9 @@ void loop() {
     Serial.println(ch1_output);
 */
     if(flag_capture_lost)
-      digitalWrite(LED_MODE, (millis() / 100 % 2) ? HIGH : LOW);
+      digitalWrite(LED_PIN, (millis() / 50 % 2) ? HIGH : LOW);
     else
-      digitalWrite(LED_MODE, HIGH);
+      digitalWrite(LED_PIN, HIGH);
   }
 }
 
