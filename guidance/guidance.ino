@@ -1,7 +1,7 @@
 #include "PID_v1.h"
 #include "Radio.h"
 
-#define CS_PIN 10
+#define CS_PIN 9
 #define LED_MODE 8
 
 #define PIN_CH1 A0
@@ -442,3 +442,4 @@ void loop() {
       digitalWrite(LED_MODE, HIGH);
   }
 }
+
