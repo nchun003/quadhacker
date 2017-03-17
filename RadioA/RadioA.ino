@@ -44,7 +44,7 @@ void setup()
   Serial.println("initialized");
   //cc1101.setSyncWord(&syncWord, false);
   cc1101.setSyncWord(syncWord, false);
-  cc1101.setCarrierFreq(CFREQ_433);
+  cc1101.setCarrierFreq(CFREQ_915);
   cc1101.disableAddressCheck();
   //cc1101.setTxPowerAmp(PA_LowPower);
   
